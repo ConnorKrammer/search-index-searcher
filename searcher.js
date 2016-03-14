@@ -20,44 +20,52 @@ module.exports = function (givenOptions, callback) {
 
     Searcher.search = function (q, callback) {
       _.defaults(q, queryDefaults);
-      q.query = removeStopwordsFromQuery(q.query);
-      var keySet = getKeySet(q);
-      if (keySet.length == 0) return callback(getEmptyResultSet(q));
-      log.info(JSON.stringify(q));
-      getDocumentFreqencies(q, keySet, function (err, frequencies) {
-        //improve returned resultset here:
-        if (err) return callback(getEmptyResultSet(q));
-        async.parallel([
-          function (callback) {
-            getResults(q, frequencies, function (hits) {
-              callback(null, hits);
+      var queryTransform = {}; // dictionary of field separator regexes
+      async.eachSeries(_.keys(q.query), function (queryField, callback) {
+        var key = 'FI￮' + queryField;
+        options.indexes.get(key, function (err, val) {
+          queryTransform[queryField] = new RegExp(_.keys(val)[0]);
+          return callback();
+        });
+      }, function (err) {
+        q.query = removeStopwordsFromQuery(q.query, queryTransform);
+        var keySet = getKeySet(q);
+        if (keySet.length == 0) return callback(getEmptyResultSet(q));
+        log.info(JSON.stringify(q));
+        getDocumentFreqencies(q, keySet, function (err, frequencies) {
+          //improve returned resultset here:
+          if (err) return callback(getEmptyResultSet(q));
+          async.parallel([
+            function (callback) {
+              getResults(q, frequencies, function (hits) {
+                callback(null, hits);
+              });
+            },
+            function (callback) {
+              getFacets(q, frequencies, function (facets) {
+                callback(null, facets);
+              });
+            }], function (err, results) {
+              var response = {};
+              response.totalHits = frequencies.allDocsIDsInResultSet.length;
+              response.totalDocsInIndex = frequencies.totalDocsInIndex;
+              response.documentFrequencies = frequencies.df;
+              response.fieldWeight = frequencies.fieldWeight;
+              response.query = q;
+              response.facets = results[1];
+              response.facetRanges = results[2];
+              response.hits = results[0];
+              callback(err, response);
             });
-          },
-          function (callback) {
-            getFacets(q, frequencies, function (facets) {
-              callback(null, facets);
-            });
-          }], function (err, results) {
-            var response = {};
-            response.totalHits = frequencies.allDocsIDsInResultSet.length;
-            response.totalDocsInIndex = frequencies.totalDocsInIndex;
-            response.documentFrequencies = frequencies.df;
-            response.fieldWeight = frequencies.fieldWeight;
-            response.query = q;
-            response.facets = results[1];
-            response.facetRanges = results[2];
-            response.hits = results[0];
-            callback(err, response);
-          });
+        });
       });
     };
 
-    var removeStopwordsFromQuery = function (qquery) {
+    var removeStopwordsFromQuery = function (qquery, queryTransform) {
       for (var i in qquery) {
         if (qquery.hasOwnProperty(i)) {
           for (var k = 0; k < qquery[i].length; k++) {
-            var swops = {inputSeparator: '￮',
-                         outputSeparator: '￮',
+            var swops = {inputSeparator: queryTransform[i],
                          stopwords: options.stopwords};
             qquery[i] = sw.removeStopwords(qquery[i].join('￮'), swops).split('￮');
           }

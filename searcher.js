@@ -20,15 +20,19 @@ module.exports = function (givenOptions, callback) {
 
     Searcher.search = function (q, callback) {
       _.defaults(q, queryDefaults);
-      var queryTransform = {}; // dictionary of field separator regexes
+      options.separators = {}; // dictionary of field separator regexes
+      options.stopwords = {}; // dictionary of field stopword lists
       async.eachSeries(_.keys(q.query), function (queryField, callback) {
-        var key = 'FI￮' + queryField;
-        options.indexes.get(key, function (err, val) {
-          queryTransform[queryField] = new RegExp(_.keys(val)[0]);
-          return callback();
+        var key = 'FI￮' + queryField + '￮';
+        options.indexes.get(key + 'separator', function (err, val) {
+          options.separators[queryField] = new RegExp(_.keys(val)[0]);
+          options.indexes.get(key + 'stopwords', function (err, val) {
+              options.stopwords[queryField] = _.keys(val)[0].split(sw.tokenSeparator);
+              return callback();
+          });
         });
       }, function (err) {
-        q.query = removeStopwordsFromQuery(q.query, queryTransform);
+        q.query = removeStopwordsFromQuery(q.query);
         var keySet = getKeySet(q);
         if (keySet.length == 0) return callback(getEmptyResultSet(q));
         log.info(JSON.stringify(q));
@@ -61,12 +65,12 @@ module.exports = function (givenOptions, callback) {
       });
     };
 
-    var removeStopwordsFromQuery = function (qquery, queryTransform) {
+    var removeStopwordsFromQuery = function (qquery) {
       for (var i in qquery) {
         if (qquery.hasOwnProperty(i)) {
           for (var k = 0; k < qquery[i].length; k++) {
-            var swops = {inputSeparator: queryTransform[i],
-                         stopwords: options.stopwords};
+            var swops = {inputSeparator: options.separators[i],
+                         stopwords: options.stopwords[i]};
             qquery[i] = sw.removeStopwords(qquery[i].join('￮'), swops).split('￮');
           }
         }
